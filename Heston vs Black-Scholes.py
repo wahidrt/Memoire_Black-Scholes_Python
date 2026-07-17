@@ -15,89 +15,157 @@ def bs_analytique_call(S, K, T, r, sigma):
 # ==============================================================================
 # 2. MOTEUR STOCHASTIQUE DE HESTON (MONTE-CARLO PAR TRONCATURE COMPLÈTE)
 # ==============================================================================
-def heston_monte_carlo_call(S0, v0, K, T, r, kappa, theta, xi, rho, M, N):
+def heston_monte_carlo_calls(
+    S0,
+    v0,
+    strikes,
+    T,
+    r,
+    kappa,
+    theta,
+    xi,
+    rho,
+    M,
+    N,
+    graine=42,
+):
     """
-    Simule les trajectoires conjointes de l'actif et de sa variance sous Heston.
-    M : Nombre de chemins (Trajectoires)
-    N : Nombre de pas de temps
+    Simule les trajectoires conjointes de l'actif et de sa variance sous Heston,
+    puis calcule les prix des Calls pour toute une liste de strikes.
+
+    M : nombre de trajectoires simulées
+    N : nombre de pas de temps
     """
+    rng = np.random.default_rng(graine)
     dt = T / N
-    
-    # Initialisation des matrices de stockage pour les trajectoires
-    S = np.zeros((M, N + 1))
-    v = np.zeros((M, N + 1))
-    
-    # Conditions initiales à t = 0
-    S[:, 0] = S0
-    v[:, 0] = v0
-    
-    # Matrice de variance-covariance pour générer les deux Browniens corrélés de pas dt
-    # Cov(dW_S, dW_v) = rho * dt
-    matrice_cov = [[dt, rho * dt], 
-                   [rho * dt, dt]]
-    
-    # Boucle temporelle (Euler-Maruyama pas à pas)
-    for t in range(1, N + 1):
-        # Génération simultanée des incréments Browniens corrélés pour les M trajectoires
-        increments = np.random.multivariate_normal([0, 0], matrice_cov, size=M)
-        dW_S = increments[:, 0]
-        dW_v = increments[:, 1]
-        
-        # Schéma de Troncature Complète (Full Truncation) pour la stabilité numérique.
-        # Si le processus de variance devient négatif à cause de la discrétisation,
-        # on utilise 0 sous la racine pour éviter un crash mathématique.
-        v_positif = np.maximum(v[:, t-1], 0)
-        
-        # Évolution stochastique de la variance (Processus CIR de Heston)
-        v[:, t] = v[:, t-1] + kappa * (theta - v_positif) * dt + xi * np.sqrt(v_positif) * dW_v
-        
-        # Évolution stochastique du prix de l'action
-        S[:, t] = S[:, t-1] * np.exp((r - 0.5 * v_positif) * dt + np.sqrt(v_positif) * dW_S)
-        
-    # Calcul du Payoff actualisé à la maturité pour chaque trajectoire
-    payoffs_finaux = np.maximum(S[:, -1] - K, 0)
-    prix_option = np.exp(-r * T) * np.mean(payoffs_finaux)
-    
-    return prix_option
+    racine_dt = np.sqrt(dt)
+
+    # Seules les valeurs courantes sont conservées afin de limiter la mémoire.
+    S = np.full(M, S0, dtype=float)
+    v = np.full(M, v0, dtype=float)
+
+    # Boucle temporelle : schéma d'Euler-Maruyama avec troncature complète.
+    for _ in range(N):
+        Z1 = rng.standard_normal(M)
+        Z2 = rng.standard_normal(M)
+
+        # Construction de deux accroissements browniens corrélés.
+        dW_S = racine_dt * Z1
+        dW_v = racine_dt * (rho * Z1 + np.sqrt(1 - rho ** 2) * Z2)
+
+        v_positif = np.maximum(v, 0)
+
+        # Évolution de la variance selon le processus CIR de Heston.
+        v = (
+            v
+            + kappa * (theta - v_positif) * dt
+            + xi * np.sqrt(v_positif) * dW_v
+        )
+
+        # Évolution du prix de l'actif.
+        S = S * np.exp(
+            (r - 0.5 * v_positif) * dt
+            + np.sqrt(v_positif) * dW_S
+        )
+
+    # Une même simulation terminale est utilisée pour tous les strikes.
+    strikes = np.asarray(strikes, dtype=float)
+    payoffs_finaux = np.maximum(S[:, np.newaxis] - strikes[np.newaxis, :], 0)
+
+    return np.exp(-r * T) * np.mean(payoffs_finaux, axis=0)
 
 
 # ==============================================================================
 # 3. CONFRONTATION ET PRODUCTION DU GRAPHIQUE COMPARATIF
 # ==============================================================================
 if __name__ == "__main__":
-    
-    # --- Paramètres Communs ---
-    S0, T, r = 100.0, 1.0, 0.05
-    strikes = np.linspace(80, 120, 15)  # Gamme de strikes du Call
-    
+
+    # --- Paramètres communs ---
+    S0, r = 100.0, 0.05
+    strikes = np.linspace(80, 120, 15)
+
+    # Plusieurs maturités, exprimées en années.
+    maturites = [0.25, 0.50, 0.75, 1.00]
+
     # --- Paramètres Black-Scholes ---
-    sigma_bs = 0.20  # Volatilité fixe à 20%
-    
+    sigma_bs = 0.20
+
     # --- Paramètres Heston ---
-    v0 = 0.04     # Variance initiale (v0 = 0.2^2, équivalent à 20% de volatilité)
-    theta = 0.04  # Moyenne de long terme de la variance (20% au carré)
-    kappa = 2.0   # Vitesse élevée de retour à la moyenne
-    xi = 0.35     # Volatilité de la volatilité importante
-    rho = -0.75   # Effet de levier négatif fort (Marché d'actions classique)
-    
-    print("Calcul des profils de prix en cours (Monte-Carlo Heston vs Analytique BS)...")
-    
-    # Génération des listes de prix pour chaque Strike
-    prix_bs = [bs_analytique_call(S0, K, T, r, sigma_bs) for K in strikes]
-    prix_heston = [heston_monte_carlo_call(S0, v0, K, T, r, kappa, theta, xi, rho, M=30000, N=100) for K in strikes]
-    
-    # --- Création du Graphique de Tendance ---
-    plt.figure(figsize=(10, 6))
-    
-    plt.plot(strikes, prix_heston, 'o-', color='darkgreen', linewidth=2, label='Modèle de Heston (Volatilité Stochastique & Levier)')
-    plt.plot(strikes, prix_bs, 's--', color='blue', linewidth=1.5, label='Modèle de Black-Scholes (Volatilité Constante $\sigma=20\%$)')
-    
-    # Habillage textuel
-    plt.title("Impact de la Volatilité Stochastique : Heston vs Black-Scholes", fontsize=12, fontweight='bold')
+    v0 = 0.04
+    theta = 0.04
+    kappa = 2.0
+    xi = 0.35
+    rho = -0.75
+
+    # --- Paramètres de Monte-Carlo ---
+    M = 30000
+    N = 100
+
+    print(
+        "Calcul des profils de prix pour plusieurs maturités "
+        "(Monte-Carlo Heston vs analytique Black-Scholes)..."
+    )
+
+    # --- Création du graphique comparatif ---
+    plt.figure(figsize=(12, 7))
+    couleurs = plt.cm.viridis(np.linspace(0.10, 0.90, len(maturites)))
+
+    for indice, (T, couleur) in enumerate(zip(maturites, couleurs)):
+        # Prix Black-Scholes pour tous les strikes à la maturité T.
+        prix_bs = bs_analytique_call(S0, strikes, T, r, sigma_bs)
+
+        # Prix Heston pour tous les strikes à la même maturité T.
+        prix_heston = heston_monte_carlo_calls(
+            S0,
+            v0,
+            strikes,
+            T,
+            r,
+            kappa,
+            theta,
+            xi,
+            rho,
+            M,
+            N,
+            graine=42 + indice,
+        )
+
+        # Même couleur pour une maturité donnée :
+        # trait continu pour Heston et pointillé pour Black-Scholes.
+        plt.plot(
+            strikes,
+            prix_heston,
+            "o-",
+            color=couleur,
+            linewidth=2,
+            markersize=4,
+            label=f"Heston — T = {T:.2f} an",
+        )
+        plt.plot(
+            strikes,
+            prix_bs,
+            "s--",
+            color=couleur,
+            linewidth=1.5,
+            markersize=4,
+            label=f"Black-Scholes — T = {T:.2f} an",
+        )
+
+    # --- Habillage du graphique ---
+    plt.title(
+        "Heston vs Black-Scholes pour plusieurs maturités",
+        fontsize=13,
+        fontweight="bold",
+    )
     plt.xlabel("Prix d'exercice / Strike (K)", fontsize=11)
     plt.ylabel("Prix du Call (€)", fontsize=11)
-    plt.grid(True, linestyle=':', alpha=0.6)
-    plt.legend(fontsize=11)
-    
+    plt.grid(True, linestyle=":", alpha=0.6)
+    plt.legend(fontsize=9, ncol=2)
+
     plt.tight_layout()
+    plt.savefig(
+        "Heston_vs_Black_Scholes_plusieurs_T.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
     plt.show()
