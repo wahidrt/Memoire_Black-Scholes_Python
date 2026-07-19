@@ -2,170 +2,226 @@ import numpy as np
 import scipy.stats as si
 import matplotlib.pyplot as plt
 
+
 # ==============================================================================
-# 1. MODÈLE DE BLACK-SCHOLES (RÉFÉRENCE À VOLATILITÉ CONSTANTE)
+# 1. MODÈLE DE BLACK-SCHOLES
 # ==============================================================================
-def bs_analytique_call(S, K, T, r, sigma):
-    """Calcule le prix exact sous l'hypothèse de volatilité constante."""
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    return S * si.norm.cdf(d1) - K * np.exp(-r * T) * si.norm.cdf(d2)
+def bs_analytique_call(S_t, K, tau, r, sigma):
+    """Prix du Call à la date t, avec tau = T - t années avant l'échéance."""
+    K = np.asarray(K, dtype=float)
+
+    if tau <= 0:
+        return np.maximum(S_t - K, 0.0)
+
+    d1 = (
+        np.log(S_t / K) + (r + 0.5 * sigma**2) * tau
+    ) / (sigma * np.sqrt(tau))
+    d2 = d1 - sigma * np.sqrt(tau)
+
+    return S_t * si.norm.cdf(d1) - K * np.exp(-r * tau) * si.norm.cdf(d2)
 
 
 # ==============================================================================
-# 2. MOTEUR STOCHASTIQUE DE HESTON (MONTE-CARLO PAR TRONCATURE COMPLÈTE)
+# 2. MODÈLE DE HESTON PAR MONTE-CARLO
 # ==============================================================================
 def heston_monte_carlo_calls(
-    S0,
-    v0,
+    S_t,
+    v_t,
     strikes,
-    T,
+    tau,
     r,
     kappa,
     theta,
     xi,
     rho,
     M,
-    N,
+    pas_par_an,
     graine=42,
 ):
     """
-    Simule les trajectoires conjointes de l'actif et de sa variance sous Heston,
-    puis calcule les prix des Calls pour toute une liste de strikes.
+    Calcule à la date t les prix des Calls sous Heston.
 
-    M : nombre de trajectoires simulées
-    N : nombre de pas de temps
+    La simulation part de l'état courant (S_t, v_t) et va jusqu'à l'échéance
+    pendant la durée résiduelle tau = T - t.
     """
+    strikes = np.asarray(strikes, dtype=float)
+
+    if tau <= 0:
+        return np.maximum(S_t - strikes, 0.0)
+
     rng = np.random.default_rng(graine)
-    dt = T / N
+    N = max(1, int(np.ceil(pas_par_an * tau)))
+    dt = tau / N
     racine_dt = np.sqrt(dt)
 
-    # Seules les valeurs courantes sont conservées afin de limiter la mémoire.
-    S = np.full(M, S0, dtype=float)
-    v = np.full(M, v0, dtype=float)
+    S = np.full(M, S_t, dtype=float)
+    v = np.full(M, v_t, dtype=float)
 
-    # Boucle temporelle : schéma d'Euler-Maruyama avec troncature complète.
     for _ in range(N):
         Z1 = rng.standard_normal(M)
         Z2 = rng.standard_normal(M)
 
-        # Construction de deux accroissements browniens corrélés.
         dW_S = racine_dt * Z1
-        dW_v = racine_dt * (rho * Z1 + np.sqrt(1 - rho ** 2) * Z2)
+        dW_v = racine_dt * (rho * Z1 + np.sqrt(1.0 - rho**2) * Z2)
 
-        v_positif = np.maximum(v, 0)
+        # Troncature complète pour éviter une variance négative dans les racines.
+        v_positif = np.maximum(v, 0.0)
 
-        # Évolution de la variance selon le processus CIR de Heston.
         v = (
             v
             + kappa * (theta - v_positif) * dt
             + xi * np.sqrt(v_positif) * dW_v
         )
 
-        # Évolution du prix de l'actif.
-        S = S * np.exp(
+        S *= np.exp(
             (r - 0.5 * v_positif) * dt
             + np.sqrt(v_positif) * dW_S
         )
 
-    # Une même simulation terminale est utilisée pour tous les strikes.
-    strikes = np.asarray(strikes, dtype=float)
-    payoffs_finaux = np.maximum(S[:, np.newaxis] - strikes[np.newaxis, :], 0)
-
-    return np.exp(-r * T) * np.mean(payoffs_finaux, axis=0)
+    payoffs = np.maximum(S[:, np.newaxis] - strikes[np.newaxis, :], 0.0)
+    return np.exp(-r * tau) * np.mean(payoffs, axis=0)
 
 
 # ==============================================================================
-# 3. CONFRONTATION ET PRODUCTION DU GRAPHIQUE COMPARATIF
+# 3. COMPARAISON À PLUSIEURS DATES t POUR UNE MÊME ÉCHÉANCE T
 # ==============================================================================
 if __name__ == "__main__":
+    # État observé du marché à chaque date t.
+    # On le garde constant ici afin d'isoler uniquement l'effet du temps restant.
+    S_t = 100.0
+    v_t = 0.04
+    r = 0.05
 
-    # --- Paramètres communs ---
-    S0, r = 100.0, 0.05
-    strikes = np.linspace(80, 120, 15)
+    strikes = np.linspace(80.0, 120.0, 21)
 
-    # Plusieurs maturités, exprimées en années.
-    maturites = [0.25, 0.50, 0.75, 1.00]
+    # Une seule option, d'échéance finale T = 1 an.
+    maturite_finale = 1.0
+    dates_observation = [0.00, 0.25, 0.50, 0.75]
 
-    # --- Paramètres Black-Scholes ---
+    # Paramètres Black-Scholes.
     sigma_bs = 0.20
 
-    # --- Paramètres Heston ---
-    v0 = 0.04
+    # Paramètres Heston.
     theta = 0.04
     kappa = 2.0
     xi = 0.35
     rho = -0.75
 
-    # --- Paramètres de Monte-Carlo ---
-    M = 30000
-    N = 100
+    # Paramètres de Monte-Carlo.
+    M = 30_000
+    pas_par_an = 200
 
-    print(
-        "Calcul des profils de prix pour plusieurs maturités "
-        "(Monte-Carlo Heston vs analytique Black-Scholes)..."
-    )
+    resultats = []
 
-    # --- Création du graphique comparatif ---
-    plt.figure(figsize=(12, 7))
-    couleurs = plt.cm.viridis(np.linspace(0.10, 0.90, len(maturites)))
+    print("Comparaison Heston / Black-Scholes au fil du temps")
+    print(f"Échéance fixe : T = {maturite_finale:.2f} an")
 
-    for indice, (T, couleur) in enumerate(zip(maturites, couleurs)):
-        # Prix Black-Scholes pour tous les strikes à la maturité T.
-        prix_bs = bs_analytique_call(S0, strikes, T, r, sigma_bs)
+    for indice, t in enumerate(dates_observation):
+        tau = maturite_finale - t
 
-        # Prix Heston pour tous les strikes à la même maturité T.
+        prix_bs = bs_analytique_call(S_t, strikes, tau, r, sigma_bs)
         prix_heston = heston_monte_carlo_calls(
-            S0,
-            v0,
-            strikes,
-            T,
-            r,
-            kappa,
-            theta,
-            xi,
-            rho,
-            M,
-            N,
+            S_t=S_t,
+            v_t=v_t,
+            strikes=strikes,
+            tau=tau,
+            r=r,
+            kappa=kappa,
+            theta=theta,
+            xi=xi,
+            rho=rho,
+            M=M,
+            pas_par_an=pas_par_an,
             graine=42 + indice,
         )
 
-        # Même couleur pour une maturité donnée :
-        # trait continu pour Heston et pointillé pour Black-Scholes.
-        plt.plot(
+        ecart = prix_heston - prix_bs
+        resultats.append((t, tau, prix_bs, prix_heston, ecart))
+
+        print(
+            f"t = {t:.2f} | T-t = {tau:.2f} | "
+            f"écart absolu moyen = {np.mean(np.abs(ecart)):.4f}"
+        )
+
+    # --------------------------------------------------------------------------
+    # Figure 1 : comparaison des prix à chaque date d'observation.
+    # --------------------------------------------------------------------------
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9), sharex=True, sharey=True)
+
+    for ax, (t, tau, prix_bs, prix_heston, ecart) in zip(
+        axes.ravel(), resultats
+    ):
+        ax.plot(
             strikes,
             prix_heston,
             "o-",
-            color=couleur,
             linewidth=2,
             markersize=4,
-            label=f"Heston — T = {T:.2f} an",
+            label="Heston",
         )
-        plt.plot(
+        ax.plot(
             strikes,
             prix_bs,
             "s--",
-            color=couleur,
-            linewidth=1.5,
+            linewidth=1.7,
             markersize=4,
-            label=f"Black-Scholes — T = {T:.2f} an",
+            label="Black-Scholes",
         )
+        ax.fill_between(
+            strikes,
+            prix_heston,
+            prix_bs,
+            alpha=0.15,
+            label="Écart entre les modèles",
+        )
+        ax.set_title(f"t = {t:.2f} an   (T - t = {tau:.2f} an)")
+        ax.grid(True, linestyle=":", alpha=0.6)
+        ax.legend(fontsize=8)
 
-    # --- Habillage du graphique ---
-    plt.title(
-        "Heston vs Black-Scholes pour plusieurs maturités",
-        fontsize=13,
+    fig.suptitle(
+        "Heston vs Black-Scholes au fil du temps — échéance fixe T = 1 an",
+        fontsize=14,
         fontweight="bold",
     )
-    plt.xlabel("Prix d'exercice / Strike (K)", fontsize=11)
-    plt.ylabel("Prix du Call (€)", fontsize=11)
-    plt.grid(True, linestyle=":", alpha=0.6)
-    plt.legend(fontsize=9, ncol=2)
-
-    plt.tight_layout()
-    plt.savefig(
-        "Heston_vs_Black_Scholes_plusieurs_T.png",
+    fig.supxlabel("Prix d'exercice / Strike (K)")
+    fig.supylabel("Prix du Call (€)")
+    fig.tight_layout(rect=(0.03, 0.03, 1.0, 0.95))
+    fig.savefig(
+        "Heston_vs_Black_Scholes_au_fil_du_temps.png",
         dpi=300,
         bbox_inches="tight",
     )
+
+    # --------------------------------------------------------------------------
+    # Figure 2 : différence signée Heston - Black-Scholes selon t et K.
+    # --------------------------------------------------------------------------
+    plt.figure(figsize=(11, 6))
+
+    for t, tau, prix_bs, prix_heston, ecart in resultats:
+        plt.plot(
+            strikes,
+            ecart,
+            "o-",
+            linewidth=1.8,
+            markersize=4,
+            label=f"t = {t:.2f} (T-t = {tau:.2f})",
+        )
+
+    plt.axhline(0.0, color="black", linewidth=1)
+    plt.title(
+        "Écart de prix Heston − Black-Scholes au fil du temps",
+        fontsize=13,
+        fontweight="bold",
+    )
+    plt.xlabel("Prix d'exercice / Strike (K)")
+    plt.ylabel("Écart de prix (€)")
+    plt.grid(True, linestyle=":", alpha=0.6)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(
+        "Ecart_Heston_moins_Black_Scholes_au_fil_du_temps.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+
     plt.show()
