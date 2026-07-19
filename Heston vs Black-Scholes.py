@@ -144,49 +144,44 @@ if __name__ == "__main__":
         )
 
     # --------------------------------------------------------------------------
-    # Figure 1 : comparaison des prix à chaque date d'observation.
+    # Figure 1 : toutes les courbes sont superposées sur un seul graphique.
     # --------------------------------------------------------------------------
-    fig, axes = plt.subplots(2, 2, figsize=(13, 9), sharex=True, sharey=True)
+    plt.figure(figsize=(13, 8))
+    couleurs = plt.cm.viridis(np.linspace(0.10, 0.90, len(resultats)))
 
-    for ax, (t, tau, prix_bs, prix_heston, ecart) in zip(
-        axes.ravel(), resultats
+    for couleur, (t, tau, prix_bs, prix_heston, ecart) in zip(
+        couleurs, resultats
     ):
-        ax.plot(
+        plt.plot(
             strikes,
             prix_heston,
             "o-",
+            color=couleur,
             linewidth=2,
             markersize=4,
-            label="Heston",
+            label=f"Heston — t = {t:.2f} (T-t = {tau:.2f})",
         )
-        ax.plot(
+        plt.plot(
             strikes,
             prix_bs,
             "s--",
+            color=couleur,
             linewidth=1.7,
             markersize=4,
-            label="Black-Scholes",
+            label=f"Black-Scholes — t = {t:.2f} (T-t = {tau:.2f})",
         )
-        ax.fill_between(
-            strikes,
-            prix_heston,
-            prix_bs,
-            alpha=0.15,
-            label="Écart entre les modèles",
-        )
-        ax.set_title(f"t = {t:.2f} an   (T - t = {tau:.2f} an)")
-        ax.grid(True, linestyle=":", alpha=0.6)
-        ax.legend(fontsize=8)
 
-    fig.suptitle(
+    plt.title(
         "Heston vs Black-Scholes au fil du temps — échéance fixe T = 1 an",
         fontsize=14,
         fontweight="bold",
     )
-    fig.supxlabel("Prix d'exercice / Strike (K)")
-    fig.supylabel("Prix du Call (€)")
-    fig.tight_layout(rect=(0.03, 0.03, 1.0, 0.95))
-    fig.savefig(
+    plt.xlabel("Prix d'exercice / Strike (K)")
+    plt.ylabel("Prix du Call (€)")
+    plt.grid(True, linestyle=":", alpha=0.6)
+    plt.legend(fontsize=9, ncol=2)
+    plt.tight_layout()
+    plt.savefig(
         "Heston_vs_Black_Scholes_au_fil_du_temps.png",
         dpi=300,
         bbox_inches="tight",
