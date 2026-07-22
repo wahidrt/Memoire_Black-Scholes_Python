@@ -3,9 +3,9 @@ import scipy.stats as si
 import matplotlib.pyplot as plt
 
 
-# ==============================================================================
+#=================================================================
 # 1. MODÈLE DE BLACK-SCHOLES
-# ==============================================================================
+#=================================================================
 def bs_analytique_call(S_t, K, tau, r, sigma):
     """Prix du Call à la date t, avec tau = T - t années avant l'échéance."""
     K = np.asarray(K, dtype=float)
@@ -21,9 +21,9 @@ def bs_analytique_call(S_t, K, tau, r, sigma):
     return S_t * si.norm.cdf(d1) - K * np.exp(-r * tau) * si.norm.cdf(d2)
 
 
-# ==============================================================================
+#=================================================================
 # 2. MODÈLE DE HESTON PAR MONTE-CARLO
-# ==============================================================================
+#=================================================================
 def heston_monte_carlo_calls(
     S_t,
     v_t,
@@ -82,9 +82,9 @@ def heston_monte_carlo_calls(
     return np.exp(-r * tau) * np.mean(payoffs, axis=0)
 
 
-# ==============================================================================
+#=================================================================
 # 3. COMPARAISON À PLUSIEURS DATES t POUR UNE MÊME ÉCHÉANCE T
-# ==============================================================================
+#=================================================================
 if __name__ == "__main__":
     # État observé du marché à chaque date t.
     # On le garde constant ici afin d'isoler uniquement l'effet du temps restant.
@@ -143,9 +143,9 @@ if __name__ == "__main__":
             f"écart absolu moyen = {np.mean(np.abs(ecart)):.4f}"
         )
 
-    # --------------------------------------------------------------------------
+    #----------------------------------------------------------------
     # Figure 1 : toutes les courbes sont superposées sur un seul graphique.
-    # --------------------------------------------------------------------------
+    #----------------------------------------------------------------
     plt.figure(figsize=(13, 8))
     couleurs = plt.cm.viridis(np.linspace(0.10, 0.90, len(resultats)))
 
@@ -187,9 +187,9 @@ if __name__ == "__main__":
         bbox_inches="tight",
     )
 
-    # --------------------------------------------------------------------------
+    #----------------------------------------------------------------
     # Figure 2 : différence signée Heston - Black-Scholes selon t et K.
-    # --------------------------------------------------------------------------
+    #----------------------------------------------------------------
     plt.figure(figsize=(11, 6))
 
     for t, tau, prix_bs, prix_heston, ecart in resultats:
