@@ -382,9 +382,8 @@ if __name__ == "__main__":
 
     # Figure 1 : comparaison lisible des niveaux de prix.
     fig, ax = plt.subplots(figsize=(13, 8))
-    couleurs = plt.cm.viridis(
-        np.linspace(0.10, 0.90, len(resultats))
-    )
+    couleurs = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+    
     for couleur, resultat in zip(couleurs, resultats):
         t, tau, prix_bs, prix_fourier, prix_mc, se_mc = resultat
         ax.plot(
